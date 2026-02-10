@@ -12,17 +12,17 @@ on:
         required: true
 
 concurrency:
-  group: polytopelabs-release-${{ github.ref }}
-  cancel-in-progress: true
+    group: release-${{ github.ref }}
+    cancel-in-progress: true
 
 jobs:
   build_and_publish:
-    runs-on: ubuntu-latest
+    runs-on: release-runner
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 100
-          token: ${{ secrets.REPO_TOKEN }}
+          token: ${{ secrets.GH_TOKEN }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
