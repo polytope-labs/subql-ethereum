@@ -125,9 +125,20 @@ export class UnfinalizedBlocksService extends BaseUnfinalizedBlocksService<Block
       if (!checkingHeader.parentHash) {
         throw new Error('Unable to get parent hash for header');
       }
-      checkingHeader = await this.blockchainService.getHeaderForHash(
-        checkingHeader.parentHash,
-      );
+      const parentHeight = checkingHeader.blockHeight - 1;
+      try {
+        checkingHeader = await this.blockchainService.getHeaderForHash(
+          checkingHeader.parentHash,
+        );
+      } catch {
+        // Parent block not found on chain (orphaned), fall back to height-based check
+        logger.warn(
+          `Failed to get block by hash, falling back to height-based check at height ${parentHeight}`,
+        );
+        checkingHeader = await this.blockchainService.getHeaderForHeight(
+          parentHeight,
+        );
+      }
     }
 
     try {
@@ -135,13 +146,13 @@ export class UnfinalizedBlocksService extends BaseUnfinalizedBlocksService<Block
       return poiHeader;
     } catch (e: any) {
       if (e.message === POI_NOT_ENABLED_ERROR_MESSAGE) {
-        return {
-          blockHeight: Math.max(
+        return this.blockchainService.getHeaderForHeight(
+          Math.max(
             0,
             forkedHeader.blockHeight -
               (this.nodeConfig as EthereumNodeConfig).blockForkReindex,
           ),
-        } as Header;
+        );
       }
       // TODO rewind back 1000+ blocks
       logger.info('Failed to use POI to rewind block');
