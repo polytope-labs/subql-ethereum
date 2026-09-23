@@ -1,0 +1,89 @@
+name: Polytopelabs Docker Publish
+
+# Builds polytopelabs/subql-node-ethereum against @subql/node-core from polytope-labs/subql instead of npm,
+# so fixes made to node-core in the fork reach the EVM indexers without waiting for an upstream release.
+on:
+  push:
+    tags:
+      - "node-ethereum/v*"
+  workflow_dispatch:
+    inputs:
+      subqlRef:
+        description: "Branch, tag or commit of polytope-labs/subql to build @subql/node-core from"
+        default: "main"
+        required: true
+      isLatest:
+        description: "Add latest tag"
+        default: "true"
+        required: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_and_publish:
+    runs-on: release-runner
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 100
+
+      - name: Checkout polytope-labs/subql
+        uses: actions/checkout@v5
+        with:
+          repository: polytope-labs/subql
+          ref: ${{ github.event.inputs.subqlRef || 'main' }}
+          path: .polytope-subql
+
+      - name: Use @subql/node-core from polytope-labs/subql
+        id: node-core
+        run: |
+          bash scripts/use-polytope-node-core.sh .polytope-subql
+          echo "SUBQL_SHA=$(git -C .polytope-subql rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Get updated node version
+        id: get-node-version
+        run: |
+          sh .github/workflows/scripts/nodeVersion.sh
+
+      - run: yarn
+      - name: build
+        run: yarn build
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_ACCESS_TOKEN }}
+
+      # v<version>-<subql commit> pins the exact node-core build; v<version> and latest move with each publish
+      - name: Image tags
+        id: tags
+        env:
+          IMAGE: polytopelabs/subql-node-ethereum
+          VERSION: ${{ steps.get-node-version.outputs.NODE_VERSION }}
+          SUBQL_SHA: ${{ steps.node-core.outputs.SUBQL_SHA }}
+          LATEST: ${{ github.event_name == 'push' || github.event.inputs.isLatest == 'true' }}
+        run: |
+          TAGS="$IMAGE:v$VERSION,$IMAGE:v$VERSION-$SUBQL_SHA"
+          if [ "$LATEST" = "true" ]; then
+            TAGS="$TAGS,$IMAGE:latest"
+          fi
+          echo "TAGS=$TAGS" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: arm64,amd64
+          file: ./packages/node/polytope/Dockerfile
+          tags: ${{ steps.tags.outputs.TAGS }}
+          build-args: RELEASE_VERSION=${{ steps.get-node-version.outputs.NODE_VERSION }}

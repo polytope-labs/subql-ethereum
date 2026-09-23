@@ -178,3 +178,6 @@ package-lock.json
 lib
 
 .DS_Store
+
+# polytope-labs/subql checkout used by scripts/use-polytope-node-core.sh in CI
+.polytope-subql
